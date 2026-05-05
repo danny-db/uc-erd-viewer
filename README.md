@@ -21,21 +21,15 @@ A Databricks App that generates interactive Entity Relationship Diagrams from Un
 - Tables with PK/FK constraints defined (informational constraints)
 - A SQL Warehouse (serverless recommended)
 - [Databricks CLI](https://docs.databricks.com/dev-tools/cli/install.html) installed and configured
-- Node.js 18+ and npm (for building the frontend)
 
 ## Deploy to Databricks
 
-### Step 1: Clone and build the frontend
+### Step 1: Clone and configure
 
 ```bash
 git clone https://github.com/danny-db/uc-erd-viewer.git
 cd uc-erd-viewer
-
-# Build the frontend (generates the static/ directory)
-cd frontend && npm install && npx vite build && cd ..
 ```
-
-Verify: a `static/` directory should now exist with `index.html` and an `assets/` folder inside it.
 
 ### Step 2: Configure your warehouse ID
 
@@ -150,19 +144,17 @@ Constraints in Databricks are **informational only** — they are not enforced b
 
 ## Updating the App
 
-After making code changes, rebuild and redeploy:
+After making code changes, re-sync and redeploy:
 
 ```bash
-# If you changed frontend code:
-cd frontend && npm install && npx vite build && cd ..
-
-# Re-sync and redeploy
 databricks sync . /Users/<your-email>/apps/uc-erd-viewer --watch=false \
   --exclude node_modules --exclude .git --exclude frontend/node_modules --exclude __pycache__
 
 databricks apps deploy uc-erd-viewer \
   --source-code-path /Workspace/Users/<your-email>/apps/uc-erd-viewer
 ```
+
+The app automatically rebuilds the frontend on startup when code changes are detected.
 
 ## Architecture
 
