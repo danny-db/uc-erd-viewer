@@ -20,26 +20,51 @@ A Databricks App that generates interactive Entity Relationship Diagrams from Un
 - A Databricks workspace with Unity Catalog enabled
 - Tables with PK/FK constraints defined (informational constraints)
 - A SQL Warehouse (serverless recommended)
-- Node.js 18+ (for building the frontend)
+- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/install.html) installed and configured
+- Node.js 18+ and npm (for building the frontend)
 
-## Quick Start
+## Deploy to Databricks
 
-### Step 1: Clone and build
+### Step 1: Clone and build the frontend
 
 ```bash
 git clone https://github.com/danny-db/uc-erd-viewer.git
 cd uc-erd-viewer
 
-# Build the frontend (outputs to static/)
+# Build the frontend (generates the static/ directory)
 cd frontend && npm install && npx vite build && cd ..
 ```
 
-### Step 2: Create and deploy the app
+Verify: a `static/` directory should now exist with `index.html` and an `assets/` folder inside it.
+
+### Step 2: Configure your warehouse ID
+
+Edit `app.yaml` and replace `REPLACE_WITH_YOUR_WAREHOUSE_ID` with your SQL Warehouse ID:
+
+```yaml
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: "your-actual-warehouse-id-here"
+```
+
+You can find your warehouse ID in the Databricks UI under **SQL Warehouses** > select your warehouse > **Connection details**.
+
+### Step 3: Create the app
 
 ```bash
-# Create the app in your workspace
-databricks apps create uc-erd-viewer
+databricks apps create uc-erd-viewer --no-wait
+```
 
+Wait for the app compute to start (takes ~1 minute):
+
+```bash
+# Check status until state is ACTIVE
+databricks apps get uc-erd-viewer | grep state
+```
+
+### Step 4: Upload and deploy
+
+```bash
 # Upload source code to workspace
 databricks sync . /Users/<your-email>/apps/uc-erd-viewer --watch=false \
   --exclude node_modules --exclude .git --exclude frontend/node_modules --exclude __pycache__
@@ -49,49 +74,62 @@ databricks apps deploy uc-erd-viewer \
   --source-code-path /Workspace/Users/<your-email>/apps/uc-erd-viewer
 ```
 
-### Step 3: Set the warehouse ID
+Replace `<your-email>` with your Databricks login email (e.g., `jane.smith@company.com`).
 
-In the Databricks workspace UI, go to **Apps** > **uc-erd-viewer** > **Settings** and set:
+Wait for the deployment to complete:
 
-| Variable | Value |
-|----------|-------|
-| `DATABRICKS_WAREHOUSE_ID` | Your SQL Warehouse ID (find it in SQL Warehouses > your warehouse > Connection Details) |
-
-### Step 4: Grant permissions to the app service principal
-
-Every Databricks App runs as an automatically-created **service principal (SP)**. You need to grant this SP access to the catalogs you want to visualize.
-
-1. **Find the SP's application ID**: Go to **Apps** > **uc-erd-viewer** > **Overview**. The `service_principal_client_id` is a UUID like `3748b70b-4202-41d1-a9cc-88dab739078f`.
-
-2. **Grant access** by running these SQL statements in a notebook or SQL editor:
-
-```sql
--- Replace <sp-application-id> with the UUID from step 1
--- Replace <catalog_name> with each catalog you want the app to access
-
--- Allow the SP to see the catalog and its schemas
-GRANT USE_CATALOG ON CATALOG <catalog_name> TO `<sp-application-id>`;
-GRANT BROWSE ON CATALOG <catalog_name> TO `<sp-application-id>`;
-
--- Allow the SP to read table/column metadata in specific schemas
-GRANT USE_SCHEMA ON SCHEMA <catalog_name>.<schema_name> TO `<sp-application-id>`;
-GRANT SELECT ON SCHEMA <catalog_name>.<schema_name> TO `<sp-application-id>`;
+```bash
+# Check until state is SUCCEEDED
+databricks apps get uc-erd-viewer | grep -A2 active_deployment
 ```
 
-> **Tip:** To grant access to ALL schemas in a catalog at once:
-> ```sql
-> GRANT USE_SCHEMA ON CATALOG <catalog_name> TO `<sp-application-id>`;
-> GRANT SELECT ON CATALOG <catalog_name> TO `<sp-application-id>`;
-> ```
+### Step 5: Grant permissions to the app's service principal
 
-The SP also needs **CAN_USE** permission on the SQL Warehouse. This is typically already granted to the `users` group by default.
+Every Databricks App automatically gets its own **service principal (SP)**. You must grant this SP access to any catalog/schema you want to visualize.
 
-### Step 5: Open the app
+**Find the SP's application ID:**
 
-Your app URL is shown on the Apps page, e.g.:
-`https://uc-erd-viewer-<workspace-id>.aws.databricksapps.com`
+```bash
+databricks apps get uc-erd-viewer | grep service_principal_client_id
+```
 
-Select a catalog and schema, click **Generate ERD**, and explore your data model.
+This returns a UUID like `3748b70b-4202-41d1-a9cc-88dab739078f`. Copy it.
+
+**Grant access** by running these SQL statements in a SQL editor or notebook:
+
+```sql
+-- Replace <sp-app-id> with the UUID from above
+-- Replace <catalog> with each catalog you want the app to access
+
+-- Required: catalog-level access
+GRANT USE_CATALOG ON CATALOG <catalog> TO `<sp-app-id>`;
+GRANT BROWSE ON CATALOG <catalog> TO `<sp-app-id>`;
+
+-- Required: schema-level access (for each schema you want to visualize)
+GRANT USE_SCHEMA ON SCHEMA <catalog>.<schema> TO `<sp-app-id>`;
+GRANT SELECT ON SCHEMA <catalog>.<schema> TO `<sp-app-id>`;
+```
+
+**Shortcut — grant access to ALL schemas in a catalog at once:**
+
+```sql
+GRANT USE_CATALOG ON CATALOG <catalog> TO `<sp-app-id>`;
+GRANT BROWSE ON CATALOG <catalog> TO `<sp-app-id>`;
+GRANT USE_SCHEMA ON CATALOG <catalog> TO `<sp-app-id>`;
+GRANT SELECT ON CATALOG <catalog> TO `<sp-app-id>`;
+```
+
+> **Note:** The SP also needs **CAN_USE** permission on the SQL Warehouse. This is typically already granted to the `users` group by default. If not, a workspace admin can add it under **SQL Warehouses** > your warehouse > **Permissions**.
+
+### Step 6: Open the app
+
+Find your app URL:
+
+```bash
+databricks apps get uc-erd-viewer | grep url
+```
+
+Open the URL in your browser. Select a catalog and schema, click **Generate ERD**, and explore your data model.
 
 ## Adding PK/FK Constraints
 
@@ -108,43 +146,22 @@ ADD CONSTRAINT fk_orders_customer
 FOREIGN KEY (customer_id) REFERENCES my_catalog.my_schema.customers(customer_id);
 ```
 
-> Note: Databricks constraints are **informational only** — they are not enforced but are used for query optimization, documentation, and tools like this one.
+Constraints in Databricks are **informational only** — they are not enforced but are used for query optimization, documentation, and tools like this ERD viewer.
 
-## Alternative: Deploy with Databricks Asset Bundles (DABs)
+## Updating the App
 
-Create a `databricks.yml` in the project root:
-
-```yaml
-bundle:
-  name: uc-erd-viewer
-
-targets:
-  dev:
-    workspace:
-      host: https://<your-workspace>.cloud.databricks.com
-
-resources:
-  apps:
-    uc-erd-viewer:
-      name: uc-erd-viewer
-      source_code_path: .
-      config:
-        command:
-          - uvicorn
-          - app:app
-          - --host
-          - 0.0.0.0
-          - --port
-          - "8000"
-        env:
-          - name: DATABRICKS_WAREHOUSE_ID
-            value: "<your-warehouse-id>"
-```
-
-Then run:
+After making code changes, rebuild and redeploy:
 
 ```bash
-databricks bundle deploy --target dev
+# If you changed frontend code:
+cd frontend && npm install && npx vite build && cd ..
+
+# Re-sync and redeploy
+databricks sync . /Users/<your-email>/apps/uc-erd-viewer --watch=false \
+  --exclude node_modules --exclude .git --exclude frontend/node_modules --exclude __pycache__
+
+databricks apps deploy uc-erd-viewer \
+  --source-code-path /Workspace/Users/<your-email>/apps/uc-erd-viewer
 ```
 
 ## Architecture
@@ -164,9 +181,9 @@ Backend (FastAPI)                    Frontend (React + React Flow)
                                      +----------------------------+
 ```
 
-- **Backend**: FastAPI queries `information_schema` tables to extract PK/FK metadata
+- **Backend**: FastAPI queries `information_schema` views (`table_constraints`, `key_column_usage`, `referential_constraints`, `constraint_column_usage`) to extract PK/FK metadata
 - **Frontend**: React Flow renders interactive node-edge diagrams with dagre auto-layout
-- **Auth**: `WorkspaceClient()` auto-authenticates as the Databricks App service principal
+- **Auth**: `WorkspaceClient()` auto-authenticates as the Databricks App's service principal
 
 ## Local Development
 

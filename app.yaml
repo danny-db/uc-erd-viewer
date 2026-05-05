@@ -9,3 +9,4 @@ command:
 env:
   - name: DATABRICKS_WAREHOUSE_ID
     description: "SQL Warehouse ID for running metadata queries"
+    value: "REPLACE_WITH_YOUR_WAREHOUSE_ID"
